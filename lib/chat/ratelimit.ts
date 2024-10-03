@@ -15,8 +15,9 @@ function getIP() {
 }
 
 export async function rateLimit() {
-  const limit = await geminiRatelimit.limit(getIP())
-  if (!limit.success) {
-    redirect('/waiting-room')
-  }
+  // const limit = await geminiRatelimit.limit(getIP())
+  // if (!limit.success) {
+  //   redirect('/waiting-room')
+  // }
+  return
 }
