@@ -9,7 +9,7 @@ export interface Bank {
     {
       id: 'gb001',
       name: 'GlobalBank',
-      email: 'support@globalbank.com',
+      email: 'ds45akash2004@gmail.com',
       phone: '1-800-123-4567'
     },
     {

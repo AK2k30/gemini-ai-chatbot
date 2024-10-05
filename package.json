@@ -34,11 +34,14 @@
     "ai": "^3.2.10",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.0",
+    "cors": "^2.8.5",
     "d3-scale": "^4.0.2",
     "date-fns": "^3.3.1",
+    "express": "^4.21.0",
     "focus-trap-react": "^10.2.3",
     "framer-motion": "^10.18.0",
     "geist": "^1.2.1",
+    "groq-sdk": "^0.7.0",
     "lucide-react": "^0.447.0",
     "nanoid": "^5.0.4",
     "next": "^14.2.14",
@@ -61,8 +64,10 @@
   },
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.10",
+    "@types/cors": "^2.8.17",
     "@types/d3-scale": "^4.0.8",
-    "@types/node": "^20.11.5",
+    "@types/express": "^5.0.0",
+    "@types/node": "^20.16.10",
     "@types/react": "^18.2.48",
     "@types/react-dom": "^18.2.18",
     "@types/react-syntax-highlighter": "^15.5.11",
@@ -78,7 +83,8 @@
     "tailwind-merge": "^2.2.0",
     "tailwindcss": "^3.4.1",
     "tailwindcss-animate": "^1.0.7",
-    "typescript": "^5.3.3"
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.2"
   },
-  "packageManager": "npm@10.8.2"
+  "packageManager": "npm@20.17.0"
 }

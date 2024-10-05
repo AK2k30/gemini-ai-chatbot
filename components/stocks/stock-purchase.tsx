@@ -6,12 +6,20 @@ import { formatNumber } from '@/lib/utils'
 
 import type { AI } from '@/lib/chat/actions'
 
+interface Message {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+  id?: string;
+}
+
 interface Purchase {
   numberOfShares?: number
   symbol: string
   price: number
   status: 'requires_action' | 'completed' | 'expired'
 }
+
+// Remove the AIState interface as it's not needed
 
 export function Purchase({
   props: { numberOfShares, symbol, price, status = 'requires_action' }
@@ -20,42 +28,32 @@ export function Purchase({
 }) {
   const [value, setValue] = useState(numberOfShares || 100)
   const [purchasingUI, setPurchasingUI] = useState<null | React.ReactNode>(null)
-  const [aiState, setAIState] = useAIState<typeof AI>()
+  const [aiState, setAIState] = useAIState() // Remove the explicit type parameter
   const [, setMessages] = useUIState<typeof AI>()
   const { confirmPurchase } = useActions()
 
-  // Unique identifier for this UI component.
   const id = useId()
 
-  // Whenever the slider changes, we need to update the local value state and the history
-  // so LLM also knows what's going on.
   function onSliderChange(e: React.ChangeEvent<HTMLInputElement>) {
     const newValue = Number(e.target.value)
     setValue(newValue)
 
-    // Insert a hidden history info to the list.
-    const message = {
-      role: 'system' as const,
-      content: `[User has changed to purchase ${newValue} shares of ${name}. Total cost: $${(
+    const message: Message = {
+      role: 'system',
+      content: `[User has changed to purchase ${newValue} shares of ${symbol}. Total cost: $${(
         newValue * price
       ).toFixed(2)}]`,
-
-      // Identifier of this UI component, so we don't insert it many times.
       id
     }
 
-    // If last history state is already this info, update it. This is to avoid
-    // adding every slider change to the history.
     if (aiState.messages[aiState.messages.length - 1]?.id === id) {
       setAIState({
         ...aiState,
         messages: [...aiState.messages.slice(0, -1), message]
       })
-
       return
     }
 
-    // If it doesn't exist, append it to history.
     setAIState({ ...aiState, messages: [...aiState.messages, message] })
   }
 
@@ -123,7 +121,6 @@ export function Purchase({
               const response = await confirmPurchase(symbol, price, value)
               setPurchasingUI(response.purchasingUI)
 
-              // Insert a new system message to the UI.
               setMessages((currentMessages: any) => [
                 ...currentMessages,
                 response.newMessage

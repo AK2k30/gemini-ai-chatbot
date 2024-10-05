@@ -1,4 +1,13 @@
-import { Message } from 'ai'
+import { Message as AIMessage } from 'ai'
+
+export type Message = AIMessage
+
+export interface Bank {
+  id: number
+  name: string
+  email: string
+}
+
 
 export interface Chat extends Record<string, any> {
   id: string
@@ -8,6 +17,7 @@ export interface Chat extends Record<string, any> {
   path: string
   messages: Message[]
   sharePath?: string
+  conversationHistory?: Message[]
 }
 
 export type ServerActionResult<Result> = Promise<

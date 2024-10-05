@@ -15,16 +15,35 @@ import { BotCard, BotMessage } from '@/components/stocks'
 import { nanoid } from '@/lib/utils'
 import { saveChat } from '@/app/actions'
 import { SpinnerMessage, UserMessage } from '@/components/stocks/message'
-import { Chat } from '../types'
+import { Message, Chat } from '../types'
 import { auth } from '@/auth'
 import { format } from 'date-fns'
-import { streamText } from 'ai'
-import { google } from '@ai-sdk/google'
 import { z } from 'zod'
 import { BankingSupport } from '@/components/banks/BankingSupport'
-import { rateLimit } from './ratelimit'
-import { sendEmail } from '@/app/api/send-email/route'
 import { banks } from '@/components/banks/bankData'
+import { sendEmail } from '@/lib/emailSender'
+
+import Groq from "groq-sdk"
+
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
+
+// Define types for message and chat completion
+interface Message {
+  role: string
+  content: string
+}
+
+interface ChatCompletion {
+  choices: Array<{
+    message?: {
+      // content: string
+      message?: Message
+    }
+  }>
+}
+
+// Initialize an array to store conversation history
+let conversationHistory: Message[] = []
 
 async function submitUserMessage(content: string) {
   'use server'
@@ -36,204 +55,62 @@ async function submitUserMessage(content: string) {
   const uiStream = createStreamableUI()
 
   try {
-    await rateLimit()
+    console.log("Received message:", content)
 
-    aiState.update({
-      ...aiState.get(),
-      messages: [
-        ...aiState.get().messages,
-        {
-          id: nanoid(),
-          role: 'user',
-          content: `${aiState.get().interactions.join('\n\n')}\n\n${content}`
-        }
-      ]
-    })
+    const chatCompletion = await getGroqChatCompletion(content)
+    console.log("Generated reply:", chatCompletion)
 
-    const history = aiState.get().messages.map(message => ({
-      role: message.role,
-      content: message.content
-    }))
+    let reply = chatCompletion.choices[0]?.message?.content || "No response"
+    
+    // Add the user's message and the bot's reply to the conversation history
+    conversationHistory.push({ role: "user", content: content })
+    conversationHistory.push({ role: "assistant", content: reply })
 
-    const result = await streamText({
-      model: google('models/gemini-1.5-flash'),
-      temperature: 0,
-      tools: {
-        showBankingSupport: {
-          description: 'Show the UI for banking support issues.',
-          parameters: z.object({
-            reason: z.string().optional()
-          })
-        },
-        sendEmailOnBehalfOfUser: {
-          description:
-            'Send a formal email on behalf of the user to their bank.',
-          parameters: z.object({
-            bankEmail: z.string(),
-            userQuery: z.string(),
-            emailContent: z.string()
-          })
-        },
-        provideSupportPhone: {
-          description: 'Provide a support phone number for the user.',
-          parameters: z.object({
-            phoneNumber: z.string()
-          })
-        }
-      },
-      system: `\
-You are a highly specialized banking assistant with extensive knowledge of all banking-related issues, procedures, and information. Your primary function is to assist users with their banking queries and problems. You have access to comprehensive information about all banks, including their customer care email addresses and phone numbers.
+    // Keep only the last 20 messages to prevent the context from becoming too long
+    if (conversationHistory.length > 20) {
+      conversationHistory = conversationHistory.slice(-20)
+    }
 
-Key points:
-1. You ONLY have knowledge about banking and cannot assist with non-banking topics.
-2. If a user's query is not related to banking, politely inform them that you cannot help and can only address banking-related issues.
-3. You can provide detailed solutions for all types of banking problems.
-4. When asked to send an email on behalf of the user, craft a formal, detailed email addressing their banking query, show it to the user for approval, and then use the sendEmailOnBehalfOfUser function to send it.
-
-The date today is ${format(new Date(), 'd LLLL, yyyy')}. 
-
-Here's the flow:
-1. Understand the user's banking issue.
-2. Provide initial guidance or information.
-3. Offer to connect the user with customer support if needed.
-4. If requested, draft and send formal emails to the bank on behalf of the user.
-5. If requested, provide a support phone number for the user.
-
-Available banks and their contact information:
-${banks.map(bank => `- ${bank.name}: Email: ${bank.email}, Phone: ${bank.phone}`).join('\n')}
-
-When providing bank contact information, use the data from this list.
-    `,
-      messages: [...history]
-    })
-
-    let textContent = ''
     spinnerStream.done(null)
 
-    for await (const delta of result.fullStream) {
-      const { type } = delta
+    // Check if the response includes an email draft
+    if (reply.includes('Subject:') && reply.includes('Dear')) {
+      const emailDraftMatch = reply.match(/Here's a draft email for you:([\s\S]*)/i)
+      if (emailDraftMatch && emailDraftMatch[1]) {
+        const emailDraft = emailDraftMatch[1].trim()
+        const bankNameMatch = emailDraft.match(/Dear (.*?) Customer Service/)
+        if (bankNameMatch && bankNameMatch[1]) {
+          const bankName = bankNameMatch[1]
+          const bank = banks.find(b => b.name === bankName)
 
-      if (type === 'text-delta') {
-        const { textDelta } = delta
-        textContent += textDelta
-        messageStream.update(<BotMessage content={textContent} />)
-
-        aiState.update({
-          ...aiState.get(),
-          messages: [
-            ...aiState.get().messages,
-            {
-              id: nanoid(),
-              role: 'assistant',
-              content: textContent
-            }
-          ]
-        })
-      } else if (type === 'tool-call') {
-        const { toolName, args } = delta
-
-        switch (toolName) {
-          case 'showBankingSupport':
-            uiStream.update(
-              <BotCard>
-                <BankingSupport />
-              </BotCard>
-            )
-            aiState.done({
-              ...aiState.get(),
-              interactions: [],
-              messages: [
-                ...aiState.get().messages,
-                {
-                  id: nanoid(),
-                  role: 'assistant',
-                  content:
-                    "Here's our banking support interface. Please select the issue you're experiencing.",
-                  display: {
-                    name: 'showBankingSupport',
-                    props: {}
-                  }
-                }
-              ]
-            })
-            break
-          case 'provideSupportEmail':
-            const { email } = args
-            aiState.done({
-              ...aiState.get(),
-              interactions: [],
-              messages: [
-                ...aiState.get().messages,
-                {
-                  id: nanoid(),
-                  role: 'assistant',
-                  content: `You can reach our customer support team via email at: ${email}`
-                }
-              ]
-            })
-            break
-          case 'provideSupportPhone':
-            const { phoneNumber } = args
-            aiState.done({
-              ...aiState.get(),
-              interactions: [],
-              messages: [
-                ...aiState.get().messages,
-                {
-                  id: nanoid(),
-                  role: 'assistant',
-                  content: `You can reach our customer support team by phone at: ${phoneNumber}`
-                }
-              ]
-            })
-            break
-          case 'sendEmailOnBehalfOfUser':
-            const { bankEmail, userQuery, emailContent, userEmail } = args
-            const emailSubject = `Customer Query: ${userQuery.substring(0, 50)}...`
-            const emailHtml = `<p>${emailContent.replace(/\n/g, '<br>')}</p>`
+          if (bank) {
+            const subjectMatch = emailDraft.match(/Subject: (.*)/)
+            const subject = subjectMatch ? subjectMatch[1] : 'Customer Complaint'
 
             const emailSent = await sendEmail({
-              to: bankEmail,
-              subject: emailSubject,
-              text: emailContent,
-              html: emailHtml,
-              replyTo: userEmail
+              to: bank.email,
+              subject: subject,
+              text: emailDraft,
+              html: emailDraft.replace(/\n/g, '<br>'),
+              replyTo: aiState.get().userEmail || ''
             })
 
             if (emailSent) {
-              aiState.done({
-                ...aiState.get(),
-                interactions: [],
-                messages: [
-                  ...aiState.get().messages,
-                  {
-                    id: nanoid(),
-                    role: 'assistant',
-                    content: `I've drafted and sent the following email on your behalf to ${bankEmail}:\n\n${emailContent}\n\nThe email has been sent successfully.`
-                  }
-                ]
-              })
+              reply += '\n\nThe email has been sent successfully to ' + bank.name + '.'
             } else {
-              aiState.done({
-                ...aiState.get(),
-                interactions: [],
-                messages: [
-                  ...aiState.get().messages,
-                  {
-                    id: nanoid(),
-                    role: 'assistant',
-                    content: `I apologize, but there was an error sending the email. Please try again later or contact support if the issue persists.`
-                  }
-                ]
-              })
+              reply += '\n\nThere was an error sending the email. Please try again later.'
             }
-            break
-
-          default:
-            console.warn(`Unhandled tool call: ${toolName}`)
+          }
         }
       }
     }
+
+    aiState.update({
+      ...aiState.get(),
+      conversationHistory: conversationHistory
+    })
+
+    messageStream.update(<BotMessage content={reply} />)
 
     uiStream.done()
     textStream.done()
@@ -264,16 +141,15 @@ When providing bank contact information, use the data from this list.
     textStream.error(new Error(errorMessage))
     messageStream.error(new Error(errorMessage))
 
-    aiState.done({
+    // Add the error message to the conversation history
+    conversationHistory.push({
+      role: 'system',
+      content: `Error: ${errorMessage}`
+    })
+
+    aiState.update({
       ...aiState.get(),
-      messages: [
-        ...aiState.get().messages,
-        {
-          id: nanoid(),
-          role: 'system',
-          content: `Error: ${errorMessage}`
-        }
-      ]
+      conversationHistory: conversationHistory
     })
   }
 
@@ -285,15 +161,33 @@ When providing bank contact information, use the data from this list.
   }
 }
 
-export type Message = {
-  role: 'user' | 'assistant' | 'system' | 'function' | 'data' | 'tool'
-  content: string
-  id?: string
-  name?: string
-  display?: {
-    name: string
-    props: Record<string, any>
-  }
+// Function to get Groq chat completion
+async function getGroqChatCompletion(userMessage: string): Promise<ChatCompletion> {
+  const banksContext = banks.map(bank => 
+    `Bank Name: ${bank.name}, Email: ${bank.email}, Phone: ${bank.phone}`
+  ).join('\n')
+
+  const systemPrompt = `You are an AI assistant specialized in handling bank-related issues. Your knowledge is limited to the following banks and their contact information:
+
+${banksContext}
+
+Only respond to queries related to these banks. If a user asks about a bank not listed here, politely inform them that you can only assist with the banks mentioned above.
+
+If the user wants to send a complaint email, offer to draft an email for them. Ask which bank they want to complain about and what their specific issue is. Then, create a professional and concise email draft addressing their concern.`
+
+  return groq.chat.completions.create({
+    messages: [
+      { role: "system", content: systemPrompt },
+      // Include the conversation history
+      ...conversationHistory,
+      // Add the new user message
+      {
+        role: "user",
+        content: userMessage,
+      },
+    ],
+    model: "llama3-8b-8192",
+  })
 }
 
 export type AIState = {
@@ -301,6 +195,8 @@ export type AIState = {
   interactions?: string[]
   messages: Message[]
   banks: Bank[]
+  userEmail?: string
+  conversationHistory: Message[]
 }
 
 export type UIState = {
@@ -315,7 +211,13 @@ export const AI = createAI<AIState, UIState>({
     submitUserMessage
   },
   initialUIState: [],
-  initialAIState: { chatId: nanoid(), interactions: [], messages: [], banks: banks },
+  initialAIState: {
+    chatId: nanoid(),
+    interactions: [],
+    messages: [],
+    banks: banks,
+    conversationHistory: []
+  },
   onGetUIState: async () => {
     'use server'
 
@@ -338,19 +240,24 @@ export const AI = createAI<AIState, UIState>({
     const session = await auth()
 
     if (session && session.user) {
-      const { chatId, messages } = state
+      const { chatId, conversationHistory } = state
 
       const createdAt = new Date()
       const userId = session.user.id as string
       const path = `/chat/${chatId}`
-      const title = messages[0].content.substring(0, 100)
+      const title =
+        conversationHistory[0]?.content.substring(0, 100) || 'New Chat'
 
       const chat: Chat = {
         id: chatId,
         title,
         userId,
         createdAt,
-        messages,
+        messages: conversationHistory.map(msg => ({
+          role: msg.role,
+          content: msg.content,
+          timestamp: new Date().toISOString()
+        })),
         path
       }
 
@@ -362,13 +269,20 @@ export const AI = createAI<AIState, UIState>({
 })
 
 export const getUIStateFromAIState = (aiState: Chat) => {
-  return aiState.messages
+  if (
+    !aiState.conversationHistory ||
+    !Array.isArray(aiState.conversationHistory)
+  ) {
+    // If conversationHistory doesn't exist or isn't an array, return an empty array
+    return []
+  }
+  return aiState.conversationHistory
     .filter(message => message.role !== 'system')
     .map((message, index) => ({
       id: `${aiState.chatId}-${index}`,
       display:
         message.role === 'assistant' ? (
-          message.display?.name === 'showBankingSupport' ? (
+          message.content.includes('showBankingSupport') ? (
             <BotCard>
               <BankingSupport />
             </BotCard>

@@ -6,6 +6,7 @@ import { getChat, getMissingKeys } from '@/app/actions'
 import { Chat } from '@/components/chat'
 import { AI } from '@/lib/chat/actions'
 import { Session } from '@/lib/types'
+import { banks } from '@/components/banks/bankData' // Add this import
 
 export interface ChatPageProps {
   params: {
@@ -24,7 +25,7 @@ export async function generateMetadata({
 
   const chat = await getChat(params.id, session.user.id)
   return {
-    title: chat?.title.toString().slice(0, 50) ?? 'Chat'
+    title: chat?.title?.toString().slice(0, 50) ?? 'Chat'
   }
 }
 
@@ -36,14 +37,14 @@ export default async function ChatPage({ params }: ChatPageProps) {
     redirect(`/login?next=/chat/${params.id}`)
   }
 
-  const userId = session.user.id as string
+  const userId = session.user.id
   const chat = await getChat(params.id, userId)
 
   if (!chat) {
     redirect('/')
   }
 
-  if (chat?.userId !== session?.user?.id) {
+  if (chat.userId !== userId) {
     notFound()
   }
 
@@ -52,7 +53,10 @@ export default async function ChatPage({ params }: ChatPageProps) {
       initialAIState={{
         chatId: chat.id,
         messages: chat.messages,
-        interactions: []
+        interactions: [],
+        banks: banks, // Use the imported banks array
+        conversationHistory: [],
+        userEmail: session.user.email // Add this line
       }}
     >
       <Chat
