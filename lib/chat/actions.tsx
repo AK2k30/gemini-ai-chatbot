@@ -36,8 +36,8 @@ interface Message {
 interface ChatCompletion {
   choices: Array<{
     message?: {
-      // content: string
-      message?: Message
+      content: string
+      // message?: Message
     }
   }>
 }
