@@ -12,10 +12,6 @@ import remarkMath from 'remark-math'
 import { StreamableValue } from 'ai/rsc'
 import { useStreamableText } from '@/lib/hooks/use-streamable-text'
 import { useCopyToClipboard } from '@/lib/hooks/use-copy-to-clipboard'
-import { useState, useEffect } from 'react'
-import { SendEmailButton } from '@/components/SendEmailButton'
-
-// Different types of message bubbles.
 
 export function UserMessage({ children }: { children: React.ReactNode }) {
   return (
@@ -33,9 +29,9 @@ export function UserMessage({ children }: { children: React.ReactNode }) {
 function ThinkingAnimation() {
   return (
     <div className="flex items-center space-x-2">
-      <div className="h-4 w-4 bg-blue-500 rounded-full animate-bounce"></div>
-      <div className="h-4 w-4 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-      <div className="h-4 w-4 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+      <div className="size-4 bg-blue-500 rounded-full animate-bounce"></div>
+      <div className="size-4 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+      <div className="size-4 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
     </div>
   )
 }
@@ -44,14 +40,12 @@ export function BotMessage({
   content,
   className,
   isLoading = false,
-  error = null,
-  showSendButton = false
+  error = null
 }: {
   content: string | StreamableValue<string>
   className?: string
   isLoading?: boolean
   error?: Error | null
-  showSendButton?: boolean
 }) {
   const text = useStreamableText(content)
   const { isCopied, copyToClipboard } = useCopyToClipboard({ timeout: 2000 })
@@ -134,7 +128,6 @@ export function BotMessage({
                 )}
               </button>
             </div>
-            {showSendButton && <SendEmailButton content={text} />}
           </>
         )}
       </div>
