@@ -15,17 +15,12 @@ import { BotCard, BotMessage } from '@/components/stocks'
 import { nanoid } from '@/lib/utils'
 import { saveChat } from '@/app/actions'
 import { SpinnerMessage, UserMessage } from '@/components/stocks/message'
-import { Message, Chat } from '../types'
+import { Chat } from '../types'
 import { auth } from '@/auth'
 import { format } from 'date-fns'
 import { z } from 'zod'
 import { BankingSupport } from '@/components/banks/BankingSupport'
 import { banks } from '@/components/banks/bankData'
-import { sendEmail } from '@/lib/emailSender'
-
-import Groq from "groq-sdk"
-
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
 
 // Define types for message and chat completion
 interface Message {
@@ -36,8 +31,7 @@ interface Message {
 interface ChatCompletion {
   choices: Array<{
     message?: {
-      // content: string
-      message?: Message
+      content: string
     }
   }>
 }
@@ -55,139 +49,86 @@ async function submitUserMessage(content: string) {
   const uiStream = createStreamableUI()
 
   try {
-    console.log("Received message:", content)
+    console.log('Received message:', content)
 
-    const chatCompletion = await getGroqChatCompletion(content)
-    console.log("Generated reply:", chatCompletion)
+    // Send the user's message to the server
+    const response = await fetch('http://localhost:3001/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ message: content }),
+    });
 
-    let reply = chatCompletion.choices[0]?.message?.content || "No response"
-    
+    if (!response.ok) {
+      throw new Error('Failed to fetch from API');
+    }
+
+    const data = await response.json();
+    const reply = data.reply;
+
+    console.log('Generated reply:', reply);
+
     // Add the user's message and the bot's reply to the conversation history
-    conversationHistory.push({ role: "user", content: content })
-    conversationHistory.push({ role: "assistant", content: reply })
+    conversationHistory.push({ role: 'user', content: content });
+    conversationHistory.push({ role: 'assistant', content: reply });
 
     // Keep only the last 20 messages to prevent the context from becoming too long
     if (conversationHistory.length > 20) {
-      conversationHistory = conversationHistory.slice(-20)
+      conversationHistory = conversationHistory.slice(-20);
     }
 
-    spinnerStream.done(null)
-
-    // Check if the response includes an email draft
-    if (reply.includes('Subject:') && reply.includes('Dear')) {
-      const emailDraftMatch = reply.match(/Here's a draft email for you:([\s\S]*)/i)
-      if (emailDraftMatch && emailDraftMatch[1]) {
-        const emailDraft = emailDraftMatch[1].trim()
-        const bankNameMatch = emailDraft.match(/Dear (.*?) Customer Service/)
-        if (bankNameMatch && bankNameMatch[1]) {
-          const bankName = bankNameMatch[1]
-          const bank = banks.find(b => b.name === bankName)
-
-          if (bank) {
-            const subjectMatch = emailDraft.match(/Subject: (.*)/)
-            const subject = subjectMatch ? subjectMatch[1] : 'Customer Complaint'
-
-            const emailSent = await sendEmail({
-              to: bank.email,
-              subject: subject,
-              text: emailDraft,
-              html: emailDraft.replace(/\n/g, '<br>'),
-              replyTo: aiState.get().userEmail || ''
-            })
-
-            if (emailSent) {
-              reply += '\n\nThe email has been sent successfully to ' + bank.name + '.'
-            } else {
-              reply += '\n\nThere was an error sending the email. Please try again later.'
-            }
-          }
-        }
-      }
-    }
+    spinnerStream.done(null);
 
     aiState.update({
       ...aiState.get(),
-      conversationHistory: conversationHistory
-    })
+      conversationHistory: conversationHistory,
+    });
 
-    messageStream.update(<BotMessage content={reply} />)
+    // Update the UI to show the bot's reply
+    messageStream.update(
+      <BotMessage content={reply} showSendButton={false} />
+    );
 
-    uiStream.done()
-    textStream.done()
-    messageStream.done()
+    uiStream.done();
+    textStream.done();
+    messageStream.done();
   } catch (error) {
-    console.error('Error in submitUserMessage:', error)
+    console.error('Error in submitUserMessage:', error);
 
-    let errorMessage = 'An unexpected error occurred. Please try again later.'
-    let errorDetails = ''
+    let errorMessage = 'An unexpected error occurred. Please try again later.';
 
     if (error instanceof Error) {
-      errorMessage = error.message
-      errorDetails = error.stack || ''
-    }
-
-    if (error instanceof z.ZodError) {
-      errorMessage = 'Invalid input data'
-      errorDetails = JSON.stringify(error.errors, null, 2)
+      errorMessage = error.message;
     }
 
     console.error('Error details:', {
       message: errorMessage,
-      details: errorDetails,
-      state: aiState.get()
-    })
+      state: aiState.get(),
+    });
 
-    uiStream.error(new Error(errorMessage))
-    textStream.error(new Error(errorMessage))
-    messageStream.error(new Error(errorMessage))
+    uiStream.error(new Error(errorMessage));
+    textStream.error(new Error(errorMessage));
+    messageStream.error(new Error(errorMessage));
 
     // Add the error message to the conversation history
     conversationHistory.push({
       role: 'system',
-      content: `Error: ${errorMessage}`
-    })
+      content: `Error: ${errorMessage}`,
+    });
 
     aiState.update({
       ...aiState.get(),
-      conversationHistory: conversationHistory
-    })
+      conversationHistory: conversationHistory,
+    });
   }
 
   return {
     id: nanoid(),
     attachments: uiStream.value,
     spinner: spinnerStream.value,
-    display: messageStream.value
-  }
-}
-
-// Function to get Groq chat completion
-async function getGroqChatCompletion(userMessage: string): Promise<ChatCompletion> {
-  const banksContext = banks.map(bank => 
-    `Bank Name: ${bank.name}, Email: ${bank.email}, Phone: ${bank.phone}`
-  ).join('\n')
-
-  const systemPrompt = `You are an AI assistant specialized in handling bank-related issues. Your knowledge is limited to the following banks and their contact information:
-
-${banksContext}
-
-Only respond to queries related to these banks. If a user asks about a bank not listed here, politely inform them that you can only assist with the banks mentioned above.
-
-If the user wants to send a complaint email, offer to draft an email for them. Ask which bank they want to complain about and what their specific issue is. Then, create a professional and concise email draft addressing their concern.`
-
-  return groq.chat.completions.create({
-    messages: [
-      { role: "system", content: systemPrompt },
-      // Include the conversation history
-      ...conversationHistory,
-      // Add the new user message
-      {
-        role: "user",
-        content: userMessage,
-      },
-    ],
-    model: "llama3-8b-8192",
-  })
+    display: messageStream.value,
+  };
 }
 
 export type AIState = {
@@ -273,7 +214,6 @@ export const getUIStateFromAIState = (aiState: Chat) => {
     !aiState.conversationHistory ||
     !Array.isArray(aiState.conversationHistory)
   ) {
-    // If conversationHistory doesn't exist or isn't an array, return an empty array
     return []
   }
   return aiState.conversationHistory
@@ -287,7 +227,10 @@ export const getUIStateFromAIState = (aiState: Chat) => {
               <BankingSupport />
             </BotCard>
           ) : (
-            <BotMessage content={message.content} />
+            <BotMessage
+              content={message.content}
+              showSendButton={false}
+            />
           )
         ) : message.role === 'user' ? (
           <UserMessage showAvatar>{message.content}</UserMessage>

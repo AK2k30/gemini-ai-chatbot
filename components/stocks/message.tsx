@@ -2,7 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import { GoogleIcon, IconGemini, IconUser } from '@/components/ui/icons'
+import { IconUser } from '@/components/ui/icons'
 import { cn } from '@/lib/utils'
 import { spinner } from './spinner'
 import { CodeBlock } from '../ui/codeblock'
@@ -13,6 +13,7 @@ import { StreamableValue } from 'ai/rsc'
 import { useStreamableText } from '@/lib/hooks/use-streamable-text'
 import { useCopyToClipboard } from '@/lib/hooks/use-copy-to-clipboard'
 import { useState, useEffect } from 'react'
+import { SendEmailButton } from '@/components/SendEmailButton'
 
 // Different types of message bubbles.
 
@@ -43,38 +44,17 @@ export function BotMessage({
   content,
   className,
   isLoading = false,
-  error = null
+  error = null,
+  showSendButton = false
 }: {
   content: string | StreamableValue<string>
   className?: string
   isLoading?: boolean
   error?: Error | null
+  showSendButton?: boolean
 }) {
   const text = useStreamableText(content)
   const { isCopied, copyToClipboard } = useCopyToClipboard({ timeout: 2000 })
-  const [localError, setLocalError] = useState<Error | null>(error)
-  const [processingStep, setProcessingStep] = useState<string>('Initializing')
-
-  useEffect(() => {
-    setLocalError(error)
-  }, [error])
-
-  useEffect(() => {
-    if (isLoading) {
-      const steps = [
-        'Analyzing request',
-        'Processing data',
-        'Generating response',
-        'Finalizing output'
-      ]
-      let currentStep = 0
-      const interval = setInterval(() => {
-        setProcessingStep(steps[currentStep])
-        currentStep = (currentStep + 1) % steps.length
-      }, 3000)
-      return () => clearInterval(interval)
-    }
-  }, [isLoading])
 
   return (
     <div className={cn('group relative flex items-start md:-ml-12', className)}>
@@ -85,12 +65,12 @@ export function BotMessage({
         {isLoading ? (
           <div className="flex flex-col items-start space-y-2">
             <ThinkingAnimation />
-            <span className="text-sm text-gray-500">{processingStep}...</span>
+            <span className="text-sm text-gray-500">Processing...</span>
           </div>
-        ) : localError ? (
+        ) : error ? (
           <div className="text-red-500">
             <p>An error occurred:</p>
-            <p>{localError.message}</p>
+            <p>{error.message}</p>
             <p className="mt-2 text-sm">Please try again or contact support if the problem persists.</p>
           </div>
         ) : (
@@ -154,6 +134,7 @@ export function BotMessage({
                 )}
               </button>
             </div>
+            {showSendButton && <SendEmailButton content={text} />}
           </>
         )}
       </div>
